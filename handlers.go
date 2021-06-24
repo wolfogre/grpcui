@@ -8,11 +8,13 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/fullstorydev/grpcurl"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
@@ -22,8 +24,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	"github.com/fullstorydev/grpcurl"
 )
 
 // RPCInvokeHandler returns an HTTP handler that can be used to invoke RPCs. The
@@ -513,7 +513,7 @@ func responseToJSON(descSource grpcurl.DescriptorSource, msg proto.Message) rpcR
 	jsm := jsonpb.Marshaler{EmitDefaults: true, OrigName: true, Indent: "  ", AnyResolver: anyResolver}
 	var b bytes.Buffer
 	if err := jsm.Marshal(&b, msg); err == nil {
-		return rpcResponseElement{Data: json.RawMessage(b.Bytes())}
+		return rpcResponseElement{Data: unescape(b.Bytes())}
 	} else {
 		b, err := json.Marshal(err.Error())
 		if err != nil {
@@ -523,4 +523,19 @@ func responseToJSON(descSource grpcurl.DescriptorSource, msg proto.Message) rpcR
 		}
 		return rpcResponseElement{Data: json.RawMessage(b), IsError: true}
 	}
+}
+
+func unescape(str []byte) []byte {
+	re := regexp.MustCompile(`(\\\d{3})+`)
+
+	return re.ReplaceAllFunc(str, func(s []byte) []byte {
+		splits := bytes.Split(s, []byte(`\`))
+		ret := bytes.Buffer{}
+		for _, v := range splits[1:] {
+			if n, err := strconv.ParseInt(string(v), 8, 9); err == nil {
+				ret.WriteByte(byte(n))
+			}
+		}
+		return ret.Bytes()
+	})
 }
